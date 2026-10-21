@@ -1027,8 +1027,8 @@ export default function App() {
               </li>
               <li>
                 <strong>Export.</strong> Download the mapped valid records,
-                original rejected records with findings and a JSON audit. Review
-                every export before using it.
+                source records requiring review with findings and a JSON audit.
+                Review every export before using it.
               </li>
             </ol>
             <p>

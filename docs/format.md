@@ -4,7 +4,7 @@
 
 Use UTF-8 with one header row and consistent row widths. The first data record is record 1; quoted multiline values still count as one record. A terminal newline is a separator. Interior blank records remain if they match the header width. A leading byte order mark is accepted. Source headers must be non-empty and distinct, using exact comparison. Target names must also be distinct after trimming for validation.
 
-Papa Parse detects the delimiter. An explicit comma, semicolon or tab choice reparses the original source and discards current mappings and corrections. Values retain exact whitespace and case. Files are limited to 1,000,000 bytes, 5,000 records and 60 columns.
+Papa Parse detects the delimiter. An explicit comma, semicolon, tab or pipe choice reparses the original source and discards current mappings and corrections. Values retain exact whitespace and case. Files are limited to 1,000,000 bytes, 5,000 records and 60 columns.
 
 ## Rules
 

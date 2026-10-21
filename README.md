@@ -6,6 +6,8 @@ Check a CSV before handing it to an import process. Map its columns, choose expl
 
 Import Ledger is a small browser tool for onboarding and support work. It helps answer concrete questions: which records share an identifier, which dates need a decision, and which values fall outside an agreed list? It does not connect to a customer system or claim that a destination will accept the output.
 
+![Record findings and the SQLite check ledger](docs/screenshots/inspection.png)
+
 ## A short walkthrough
 
 1. Choose **Try the sample**. The six fictional customer records include a repeated identifier, an ambiguous date and a status outside the allowed list.
