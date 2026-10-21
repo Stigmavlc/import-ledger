@@ -207,6 +207,7 @@ describe("documented resource limits", () => {
     );
     expect(JSON.stringify(result.issues).length).toBeLessThan(2_500_000);
     expect(result.issues.at(-1)?.relatedRecords).toContain(1);
+    expect(result.issues[0].message).toContain("4,989 more");
   });
   it("rejects a file above one million UTF-8 bytes", () =>
     expect(() => readCsv("id\n" + "x".repeat(LIMIT_BYTES))).toThrow(/1 MB/));
@@ -240,5 +241,43 @@ describe("documented resource limits", () => {
     expect(() => validateRules(rules, sheet)).not.toThrow();
     rules[0].reference.push("extra");
     expect(() => validateRules(rules, sheet)).toThrow(/500/);
+  });
+});
+
+describe("export audit choices and empty subsets", () => {
+  it("exports only a header for empty valid and rejected subsets", async () => {
+    const sheet = readCsv("id\nA\nA");
+    const rules = initialRules(sheet);
+    const audit = await inspect(sheet, rules, load);
+    expect(exportCsv(audit, rules, "valid")).toBe('"_source_record","id"');
+    const clean = readCsv("id\nA");
+    const cleanRules = initialRules(clean);
+    const cleanAudit = await inspect(clean, cleanRules, load);
+    expect(exportCsv(cleanAudit, cleanRules, "rejected")).toBe(
+      '"_source_record","id"',
+    );
+    expect(csv(["id", "_issues"], [])).toBe('"id","_issues"');
+  });
+  it("records the current valid CSV protection choice and affected cells", async () => {
+    const sheet = readCsv("id,phone\nA,+441234567890");
+    const rules = initialRules(sheet);
+    const audit = await inspect(sheet, rules, load);
+    const exact = JSON.parse(
+      manifest(sheet, rules, audit, "hash", sheet.rows, false),
+    );
+    const protectedAudit = JSON.parse(
+      manifest(sheet, rules, audit, "hash", sheet.rows, true),
+    );
+    expect(exact.exportOptions.validCsvProtection).toEqual({
+      enabled: false,
+      matchingCellCount: 1,
+      affectedCellCount: 0,
+    });
+    expect(protectedAudit.exportOptions.validCsvProtection).toEqual({
+      enabled: true,
+      matchingCellCount: 1,
+      affectedCellCount: 1,
+    });
+    expect(exact.exportOptions.reviewCsvProtection).toBe(true);
   });
 });

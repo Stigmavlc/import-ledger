@@ -270,7 +270,7 @@ export async function inspect(
           r.name,
           "Duplicate",
           (row) =>
-            `Value “${row.value}” is also used by record(s) ${row.partnerPreview}${Number(row.remainingPartners) > 0 ? ` and ${row.remainingPartners} more` : ""}. Every matching record has its own finding.`,
+            `Value “${row.value}” is also used by record(s) ${row.partnerPreview}${Number(row.remainingPartners) > 0 ? ` and ${formatCount(Number(row.remainingPartners))} more` : ""}. Every matching record has its own finding.`,
         );
       if (r.reference.length)
         check(
@@ -298,6 +298,9 @@ export async function inspect(
   }
 }
 
+export const formatCount = (value: number) =>
+  new Intl.NumberFormat("en-GB").format(value);
+
 export function needsSpreadsheetProtection(value: string): boolean {
   return /^[\t\r\n]|^\s*[=+@-]/.test(value);
 }
@@ -314,15 +317,14 @@ export function csv(
   rows: string[][],
   protect = true,
 ): string {
-  return (
-    Papa.unparse(
-      {
-        fields: protect ? headers.map(spreadsheetSafe) : headers,
-        data: protect ? rows.map((row) => row.map(spreadsheetSafe)) : rows,
-      },
-      { newline: "\r\n", quotes: true, escapeFormulae: protect },
-    ) + "\r\n"
+  const output = Papa.unparse(
+    {
+      fields: protect ? headers.map(spreadsheetSafe) : headers,
+      data: protect ? rows.map((row) => row.map(spreadsheetSafe)) : rows,
+    },
+    { newline: "\r\n", quotes: true, escapeFormulae: protect },
   );
+  return rows.length ? output + "\r\n" : output.replace(/\r\n$/, "");
 }
 export function exportCsv(
   audit: Audit,
@@ -343,12 +345,19 @@ export function exportCsv(
     protect,
   );
 }
+export function protectionCellCount(audit: Audit, rules: Rule[]): number {
+  return [
+    ...rules.map((r) => r.name),
+    ...audit.valid.flatMap((n) => audit.mapped[n - 1]),
+  ].filter(needsSpreadsheetProtection).length;
+}
 export function manifest(
   sheet: Sheet,
   rules: Rule[],
   audit: Audit,
   hash: string,
   originalRows: string[][] = sheet.rows,
+  protectValidCsv = false,
 ) {
   return (
     JSON.stringify(
@@ -400,10 +409,20 @@ export function manifest(
             "_issues",
           ),
         },
+        exportOptions: {
+          validCsvProtection: {
+            enabled: protectValidCsv,
+            matchingCellCount: protectionCellCount(audit, rules),
+            affectedCellCount: protectValidCsv
+              ? protectionCellCount(audit, rules)
+              : 0,
+          },
+          reviewCsvProtection: true,
+        },
         issues: audit.issues,
         queries: audit.queries,
         exportNotes:
-          "Valid import values are preserved by default. Optional spreadsheet protection prefixes matching cells with an apostrophe and changes their values; the review CSV always applies it. Explicit edits are recorded below; unchanged source values are not copied into this audit. Record numbers count data records, not physical lines. No live destination has been checked.",
+          "Valid import values are preserved by default. Optional spreadsheet protection prefixes matching cells with an apostrophe and changes their values; the review CSV always applies it. The selected valid CSV protection setting and affected cell count reflect this audit download, not proof that a CSV was downloaded. Explicit edits are recorded; unchanged source values are not copied into this audit. Record numbers count data records, not physical lines. No live destination has been checked.",
       },
       null,
       2,

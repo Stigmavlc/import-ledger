@@ -20,7 +20,8 @@ import {
   csv,
   LIMIT_BYTES,
   metadataColumn,
-  needsSpreadsheetProtection,
+  protectionCellCount,
+  formatCount,
   typeExpectations,
 } from "./ledger";
 import type { Sheet, Rule, Audit, FieldType } from "./ledger";
@@ -61,6 +62,9 @@ export default function App() {
     [jump, setJump] = useState(""),
     [focusRecord, setFocusRecord] = useState<number | null>(null),
     [filter, setFilter] = useState<"all" | "rejected" | "valid">("all");
+  const [referenceDrafts, setReferenceDrafts] = useState<
+    Record<string, string>
+  >({});
   const [hash, setHash] = useState(""),
     [delimiter, setDelimiter] = useState(""),
     [raw, setRaw] = useState(""),
@@ -101,6 +105,7 @@ export default function App() {
       originalRows.current = parsed.rows;
       setSheet(parsed);
       setRules(next);
+      setReferenceDrafts({});
       setDelimiter(chosen);
       setStale(false);
       setProtectExport(false);
@@ -173,7 +178,7 @@ export default function App() {
       setFilter("all");
       setPage(0);
       setNotice(
-        `Checks complete. ${next.valid.length} valid records and ${next.rejected.length} requiring review.`,
+        `Checks complete. ${formatCount(next.valid.length)} valid records and ${formatCount(next.rejected.length)} requiring review.`,
       );
     } catch (e) {
       setError(`Checks could not finish. ${(e as Error).message}`);
@@ -228,6 +233,7 @@ export default function App() {
     revision.current++;
     setSheet(null);
     setRules([]);
+    setReferenceDrafts({});
     setAudit(null);
     setRaw("");
     setHash("");
@@ -238,12 +244,7 @@ export default function App() {
     setNotice("Workspace cleared.");
     clearRef.current?.close();
   }
-  const protectedCellCount = audit
-    ? [
-        ...rules.map((r) => r.name),
-        ...audit.valid.flatMap((n) => audit.mapped[n - 1]),
-      ].filter(needsSpreadsheetProtection).length
-    : 0;
+  const protectedCellCount = audit ? protectionCellCount(audit, rules) : 0;
   function rejectedCsv() {
     if (!sheet || !audit) return "";
     return csv(
@@ -406,7 +407,7 @@ export default function App() {
                   <small>
                     {sheet.rows.length.toLocaleString("en-GB")}{" "}
                     {sheet.rows.length === 1 ? "record" : "records"} ·{" "}
-                    {sheet.headers.length}{" "}
+                    {formatCount(sheet.headers.length)}{" "}
                     {sheet.headers.length === 1 ? "column" : "columns"} ·{" "}
                     {sheet.delimiter === "\t"
                       ? "Tab"
@@ -578,15 +579,22 @@ export default function App() {
                             <textarea
                               id={`reference-${r.id}`}
                               rows={2}
-                              value={r.reference.join("\n")}
+                              value={
+                                referenceDrafts[r.id] ?? r.reference.join("\n")
+                              }
                               disabled={busy}
-                              onChange={(e) =>
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                setReferenceDrafts((current) => ({
+                                  ...current,
+                                  [r.id]: value,
+                                }));
                                 updateRule(i, {
-                                  reference: e.target.value
+                                  reference: value
                                     .split("\n")
                                     .filter((v) => v !== ""),
-                                })
-                              }
+                                });
+                              }}
                             />
                           </td>
                           <td>
@@ -679,8 +687,9 @@ export default function App() {
                           : "The current checks passed."}
                     </h2>
                     <p>
-                      {audit.valid.length} valid · {audit.rejected.length}{" "}
-                      requiring review · {audit.issues.length} findings
+                      {formatCount(audit.valid.length)} valid ·{" "}
+                      {formatCount(audit.rejected.length)} requiring review ·{" "}
+                      {formatCount(audit.issues.length)} findings
                     </p>
                   </div>
                   <button
@@ -875,7 +884,7 @@ export default function App() {
                           <small>
                             {q.issueCount === 0
                               ? "Passed"
-                              : `${q.issueCount} ${q.issueCount === 1 ? "finding" : "findings"}`}
+                              : `${formatCount(q.issueCount)} ${q.issueCount === 1 ? "finding" : "findings"}`}
                           </small>
                         </span>
                         <ArrowRight />
@@ -921,12 +930,9 @@ export default function App() {
                     Add spreadsheet protection to the valid CSV
                   </label>
                   <p>
-                    {protectedCellCount}{" "}
-                    {protectedCellCount === 1
-                      ? "cell would gain"
-                      : "cells would gain"}{" "}
-                    an apostrophe, including matching headers, phone numbers and
-                    negative amounts. This changes their values.{" "}
+                    {protectedCellCount === 0
+                      ? "No cells match the protection rule. This setting changes no values in the current valid CSV. "
+                      : `${formatCount(protectedCellCount)} ${protectedCellCount === 1 ? "cell would gain" : "cells would gain"} an apostrophe. Matching headers or values would change. `}
                     {protectExport
                       ? "Protection is on."
                       : "Protection is off; exact values will be exported."}
@@ -943,7 +949,8 @@ export default function App() {
                     <span>
                       <strong>Valid records</strong>
                       <small>
-                        {audit.valid.length} records · mapped columns
+                        {formatCount(audit.valid.length)} records · mapped
+                        columns
                       </small>
                     </span>
                     <ArrowDown />
@@ -960,8 +967,8 @@ export default function App() {
                     <span>
                       <strong>Records requiring review</strong>
                       <small>
-                        {audit.rejected.length} records · all source columns and
-                        findings
+                        {formatCount(audit.rejected.length)} records · all
+                        source columns and findings
                       </small>
                     </span>
                     <ArrowDown />
@@ -977,6 +984,7 @@ export default function App() {
                           audit,
                           hash,
                           originalRows.current,
+                          protectExport,
                         ),
                         "application/json",
                       )
@@ -985,8 +993,8 @@ export default function App() {
                     <span>
                       <strong>Audit manifest</strong>
                       <small>
-                        Original file fingerprint, current rules and check
-                        results
+                        Original fingerprint, rules, results and current CSV
+                        protection setting
                       </small>
                     </span>
                     <ArrowDown />
@@ -1090,7 +1098,7 @@ export default function App() {
               <code>{JSON.stringify(audit.queries[query].parameters)}</code>
             </p>
             <p>
-              {audit.queries[query].issueCount}{" "}
+              {formatCount(audit.queries[query].issueCount)}{" "}
               {audit.queries[query].issueCount === 1 ? "finding" : "findings"}.
               The SQL is read only and runs against this tab's in-memory
               database.
@@ -1158,19 +1166,35 @@ export default function App() {
                       {issue.message}
                     </span>
                   ))}
-                <textarea
-                  rows={2}
-                  aria-label={`New ${header}`}
-                  value={edit.row[i]}
-                  onChange={(e) =>
-                    setEdit({
-                      ...edit,
-                      row: edit.row.map((v, f) =>
-                        f === i ? e.target.value : v,
-                      ),
-                    })
-                  }
-                />
+                {/[\r\n]/.test(sheet.rows[edit.record - 1][i]) ? (
+                  <textarea
+                    rows={2}
+                    aria-label={`New ${header}`}
+                    value={edit.row[i]}
+                    onChange={(e) =>
+                      setEdit({
+                        ...edit,
+                        row: edit.row.map((v, f) =>
+                          f === i ? e.target.value : v,
+                        ),
+                      })
+                    }
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    aria-label={`New ${header}`}
+                    value={edit.row[i]}
+                    onChange={(e) =>
+                      setEdit({
+                        ...edit,
+                        row: edit.row.map((v, f) =>
+                          f === i ? e.target.value : v,
+                        ),
+                      })
+                    }
+                  />
+                )}
               </label>
             ))}
           <button className="primary" type="submit">

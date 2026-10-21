@@ -88,7 +88,7 @@ No automatic date conversion, trimming, deduplication, key generation, fuzzy mat
 
 Duplicate findings show up to ten partner record links and the total number of other matches. Every member of the group has a separate finding, so large groups remain reviewable without repeating thousands of links in each row.
 
-The valid import CSV preserves exact mapped values by default, including international phone numbers and negative amounts. An explicit export checkbox offers spreadsheet protection and shows the number of cells it would alter. Protection prefixes matching values and headers with an apostrophe, which changes what an importer receives. The review CSV always uses this protection. A spreadsheet can evaluate formula-like values in an exact-value export; inspect it as text or use the intended importer. Review the [format reference](docs/format.md) before importing an exported file.
+The valid import CSV preserves exact mapped values by default, including international phone numbers and negative amounts. An explicit export checkbox offers spreadsheet protection and shows the number of cells it would alter. Protection prefixes matching values and headers with an apostrophe, which changes what an importer receives. The audit records the selected setting and the number of matching and affected cells at its own download. The review CSV always uses this protection. A spreadsheet can evaluate formula-like values in an exact-value export; inspect it as text or use the intended importer. Review the [format reference](docs/format.md) before importing an exported file.
 
 ## Licence
 
