@@ -13,6 +13,7 @@ import {
   LIMIT_RECORDS,
   LIMIT_COLUMNS,
   validateRules,
+  editedMultilineValue,
 } from "./ledger";
 const load = () => initSqlJs();
 describe("CSV structure and exact values", () => {
@@ -279,5 +280,25 @@ describe("export audit choices and empty subsets", () => {
       affectedCellCount: 1,
     });
     expect(exact.exportOptions.reviewCsvProtection).toBe(true);
+  });
+});
+
+describe("explicit multiline edits", () => {
+  it("preserves existing CRLF, LF and CR styles, with an explicit mixed style fallback", () => {
+    expect(
+      editedMultilineValue(
+        "Line one\r\nLine two",
+        "Line one\nLine two\nLine three",
+      ),
+    ).toBe("Line one\r\nLine two\r\nLine three");
+    expect(editedMultilineValue("One\nTwo", "One\nTwo\nThree")).toBe(
+      "One\nTwo\nThree",
+    );
+    expect(editedMultilineValue("One\rTwo", "One\nTwo\nThree")).toBe(
+      "One\rTwo\rThree",
+    );
+    expect(editedMultilineValue("One\r\nTwo\nThree", "One\nTwo\nThree!")).toBe(
+      "One\nTwo\nThree!",
+    );
   });
 });

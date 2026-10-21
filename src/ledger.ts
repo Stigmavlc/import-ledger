@@ -298,6 +298,22 @@ export async function inspect(
   }
 }
 
+export function lineBreakStyle(value: string): string | null {
+  const breaks = value.match(/\r\n|\r|\n/g) ?? [];
+  return breaks.length === 0
+    ? null
+    : new Set(breaks).size === 1
+      ? (breaks[0] ?? null)
+      : "mixed";
+}
+export function editedMultilineValue(original: string, edited: string): string {
+  const style = lineBreakStyle(original);
+  return edited.replace(
+    /\r\n|\r|\n/g,
+    style && style !== "mixed" ? style : "\n",
+  );
+}
+
 export const formatCount = (value: number) =>
   new Intl.NumberFormat("en-GB").format(value);
 

@@ -21,6 +21,8 @@ import {
   LIMIT_BYTES,
   metadataColumn,
   protectionCellCount,
+  lineBreakStyle,
+  editedMultilineValue,
   formatCount,
   typeExpectations,
 } from "./ledger";
@@ -191,7 +193,13 @@ export default function App() {
     setSheet({
       ...sheet,
       rows: sheet.rows.map((row, i) =>
-        i === edit.record - 1 ? edit.row : row,
+        i === edit.record - 1
+          ? edit.row.map((value, field) =>
+              value === row[field]
+                ? value
+                : editedMultilineValue(row[field], value),
+            )
+          : row,
       ),
     });
     revision.current++;
@@ -1167,19 +1175,27 @@ export default function App() {
                     </span>
                   ))}
                 {/[\r\n]/.test(sheet.rows[edit.record - 1][i]) ? (
-                  <textarea
-                    rows={2}
-                    aria-label={`New ${header}`}
-                    value={edit.row[i]}
-                    onChange={(e) =>
-                      setEdit({
-                        ...edit,
-                        row: edit.row.map((v, f) =>
-                          f === i ? e.target.value : v,
-                        ),
-                      })
-                    }
-                  />
+                  <>
+                    <span className="field-guidance">
+                      {lineBreakStyle(sheet.rows[edit.record - 1][i]) ===
+                      "mixed"
+                        ? "Editing this value standardises its mixed line breaks to LF."
+                        : "Existing line breaks keep their original style when you edit this value."}
+                    </span>
+                    <textarea
+                      rows={2}
+                      aria-label={`New ${header}`}
+                      value={edit.row[i]}
+                      onChange={(e) =>
+                        setEdit({
+                          ...edit,
+                          row: edit.row.map((v, f) =>
+                            f === i ? e.target.value : v,
+                          ),
+                        })
+                      }
+                    />
+                  </>
                 ) : (
                   <input
                     type="text"

@@ -479,3 +479,91 @@ test("audit downloads record checkbox choices and zero protection is explained a
     page.getByText("No cells match the protection rule.", { exact: false }),
   ).toBeVisible();
 });
+
+test("single line record editors stay visibly editable at desktop and phone widths", async ({
+  page,
+}) => {
+  await page
+    .getByRole("button", { name: "Try the sample", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Run checks", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Edit record 3, customer_id", exact: true })
+    .click();
+  const email = page.getByRole("textbox", { name: "New email", exact: true });
+  await email.fill(
+    "eleanor.featherstonehaugh.long.address.for.testing@example.test",
+  );
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    const style = await email.evaluate((el) => {
+      const computed = getComputedStyle(el);
+      return {
+        border: parseFloat(computed.borderLeftWidth),
+        borderStyle: computed.borderLeftStyle,
+        padding: parseFloat(computed.paddingLeft),
+        background: computed.backgroundColor,
+        width: el.getBoundingClientRect().width,
+        parentWidth: el.parentElement!.getBoundingClientRect().width,
+      };
+    });
+    expect(style.border).toBeGreaterThanOrEqual(1);
+    expect(style.borderStyle).toBe("solid");
+    expect(style.padding).toBeGreaterThanOrEqual(10);
+    expect(style.background).toBe("rgb(255, 255, 255)");
+    expect(Math.abs(style.width - style.parentWidth)).toBeLessThan(2);
+    await email.focus();
+    await expect(email).toBeFocused();
+    expect(
+      await email.evaluate((el) => getComputedStyle(el).outlineStyle),
+    ).toBe("solid");
+    await expect(email).toHaveValue(
+      "eleanor.featherstonehaugh.long.address.for.testing@example.test",
+    );
+  }
+});
+
+test("editing multiline notes preserves Windows line breaks in the CSV and audit", async ({
+  page,
+}, info) => {
+  await page.getByLabel("Choose CSV file", { exact: true }).setInputFiles({
+    name: "notes.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from('id,notes\r\nA,"Line one\r\nLine two"\r\n'),
+  });
+  await page.getByRole("button", { name: "Run checks", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Edit record 1, notes", exact: true })
+    .click();
+  const notes = page.getByRole("textbox", { name: "New notes", exact: true });
+  await expect(notes).toHaveJSProperty("tagName", "TEXTAREA");
+  await notes.press("ControlOrMeta+Home");
+  await notes.pressSequentially("First ");
+  await notes.press("ArrowDown");
+  for (let step = 0; step < 20; step++) await notes.press("ArrowRight");
+  await notes.press("Enter");
+  await notes.pressSequentially("Line three");
+  await expect(notes).toHaveValue("First Line one\nLine two\nLine three");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await page.getByRole("button", { name: "Run checks", exact: true }).click();
+  await page.getByRole("button", { name: "Export files", exact: true }).click();
+  const csvWaiting = page.waitForEvent("download");
+  await page.getByRole("button", { name: /^Valid records/ }).click();
+  const csvPath = path.join(info.outputDir, "notes.csv");
+  await (await csvWaiting).saveAs(csvPath);
+  expect(await readFile(csvPath, "utf8")).toContain(
+    '"First Line one\r\nLine two\r\nLine three"',
+  );
+  const auditWaiting = page.waitForEvent("download");
+  await page.getByRole("button", { name: /Audit manifest/ }).click();
+  const auditPath = path.join(info.outputDir, "notes.json");
+  await (await auditWaiting).saveAs(auditPath);
+  expect(JSON.parse(await readFile(auditPath, "utf8")).edits).toEqual([
+    {
+      record: 1,
+      field: "notes",
+      before: "Line one\r\nLine two",
+      after: "First Line one\r\nLine two\r\nLine three",
+    },
+  ]);
+});

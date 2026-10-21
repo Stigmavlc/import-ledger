@@ -23,7 +23,7 @@ Optional blanks pass type and reference checks. Multiple rules can produce multi
 
 ## Corrections
 
-A cell opens the full source record for explicit changes. Saving keeps inspection open with the previous findings clearly marked out of date and disables export until a new run. Several corrections can be made before running the checks once. Field guidance shows expected formats and allowed values. Duplicate findings name their partners, with a jump to each matching record. Changes remain in memory. There is no undo history, saved mapping or persistent recovery. Replacing or clearing a file discards its workspace.
+A cell opens the full source record for explicit changes. Saving keeps inspection open with the previous findings clearly marked out of date and disables export until a new run. Several corrections can be made before running the checks once. Field guidance shows expected formats and allowed values. Duplicate findings name their partners, with a jump to each matching record. Editing a multiline value preserves its existing line-break style when that style is consistent, including Windows CRLF. If a value contains mixed line-break styles, the editor visibly warns that changing it standardises all its line breaks to LF. Unedited values retain their original line breaks. Changes remain in memory. There is no undo history, saved mapping or persistent recovery. Replacing or clearing a file discards its workspace.
 
 ## Exports
 
