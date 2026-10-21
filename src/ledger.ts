@@ -65,10 +65,10 @@ export async function inspect(sheet:Sheet,rules:Rule[],load:()=>Promise<SqlJsSta
  const mapped=sheet.rows.map(row=>rules.map(r=>r.source===null?'':row[r.source]));
  try{
   const columns=rules.map((_,i)=>`f${i} TEXT`).join(',');
-  db.run(`CREATE TABLE records(record INTEGER PRIMARY KEY,${columns}); CREATE TABLE invalid_types(record INTEGER,field TEXT); CREATE TABLE reference_values(field TEXT,value TEXT);`);
+  db.run(`CREATE TABLE records(record INTEGER PRIMARY KEY,${columns}); CREATE TABLE reference_values(field TEXT,value TEXT);`);
   const insert=db.prepare(`INSERT INTO records VALUES (${Array(rules.length+1).fill('?').join(',')})`);
-  const types=db.prepare('INSERT INTO invalid_types VALUES (?,?)');
-  mapped.forEach((row,i)=>{insert.run([i+1,...row]);row.forEach((v,f)=>{if(!validType(v,rules[f].type))types.run([i+1,`f${f}`]);});});insert.free();types.free();
+  mapped.forEach((row,i)=>insert.run([i+1,...row]));insert.free();
+  for(const type of ['integer','decimal','date','email'] as const)db.create_function(`valid_${type}`,(value:unknown)=>validType(String(value??''),type)?1:0);
   const ref=db.prepare('INSERT INTO reference_values VALUES (?,?)');
   rules.forEach((r,f)=>[...new Set(r.reference)].forEach(v=>ref.run([`f${f}`,v])));ref.free();
   function check(name:string,sql:string,parameters:string[],field:string,kind:string,message:string){
@@ -79,7 +79,7 @@ export async function inspect(sheet:Sheet,rules:Rule[],load:()=>Promise<SqlJsSta
   rules.forEach((r,i)=>{
    const col=`f${i}`;
    if(r.required)check(`${r.name}: required`,`SELECT record FROM records WHERE trim(${col}) = '' ORDER BY record`,[],r.name,'Required','A required value is blank.');
-   if(r.type!=='text')check(`${r.name}: ${r.type}`,`SELECT record FROM invalid_types WHERE field = ? ORDER BY record`,[col],r.name,'Type',`Use an explicit ${r.type} value; no automatic conversion was applied.`);
+   if(r.type!=='text')check(`${r.name}: ${r.type}`,`SELECT record FROM records WHERE trim(${col}) <> '' AND valid_${r.type}(${col}) = 0 ORDER BY record`,[],r.name,'Type',`Use an explicit ${r.type} value; no automatic conversion was applied.`);
    if(r.key)check(`${r.name}: duplicate key`,`SELECT r.record FROM records AS r JOIN (SELECT ${col} AS value FROM records WHERE trim(${col}) <> '' GROUP BY ${col} HAVING COUNT(*) > 1) AS repeated ON r.${col} = repeated.value ORDER BY r.record`,[],r.name,'Duplicate','Every record sharing this key needs review.');
    if(r.reference.length)check(`${r.name}: reference list`,`SELECT r.record FROM records AS r LEFT JOIN reference_values AS allowed ON allowed.field = ? AND allowed.value = r.${col} WHERE trim(r.${col}) <> '' AND allowed.value IS NULL ORDER BY r.record`,[col],r.name,'Reference','The exact value is absent from the reference list.');
   });
