@@ -30,7 +30,7 @@ test("sample checks expose the SQL and real findings", async ({ page }) => {
     page.getByRole("button", { name: "Edit record 2, name", exact: true }),
   ).toHaveCount(0);
 });
-test("a valid UTF-8 upload exports exact values with spreadsheet escaping", async ({
+test("a valid UTF-8 upload preserves values and offers explicit spreadsheet protection", async ({
   page,
 }, info) => {
   await page.getByLabel("Choose CSV file", { exact: true }).setInputFiles({
@@ -52,7 +52,18 @@ test("a valid UTF-8 upload exports exact values with spreadsheet escaping", asyn
   await download.saveAs(target);
   const text = await readFile(target, "utf8");
   expect(text).toContain("Café, Hull");
-  expect(text).toContain("' =1+2");
+  expect(text).toContain('" =1+2"');
+  expect(text).not.toContain("' =1+2");
+  await page
+    .getByRole("checkbox", {
+      name: "Add spreadsheet protection to the valid CSV",
+    })
+    .check();
+  const protectedDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: /^Valid records/ }).click();
+  const protectedTarget = path.join(info.outputDir, "protected.csv");
+  await (await protectedDownload).saveAs(protectedTarget);
+  expect(await readFile(protectedTarget, "utf8")).toContain("' =1+2");
   expect(download.suggestedFilename()).toBe("import-ledger-valid.csv");
 });
 test("corrections invalidate results and every check runs again", async ({
@@ -222,4 +233,155 @@ test("audit download keeps source identity and explicit changes", async ({
       query.sql.includes("LEFT JOIN"),
     ),
   ).toBe(true);
+});
+
+test("new files reset a pending delimiter choice", async ({ page }) => {
+  await page
+    .getByRole("button", { name: "Try the sample", exact: true })
+    .click();
+  await page
+    .getByText("Source delimiter and file structure", { exact: true })
+    .click();
+  await page.getByLabel("Delimiter", { exact: true }).selectOption(";");
+  await page
+    .getByLabel("Choose CSV file", { exact: true })
+    .setInputFiles({
+      name: "comma.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from("id,name\nA,Ann\nB,Bob"),
+    });
+  await expect(page.locator(".source-bar")).toContainText(
+    "2 records · 2 columns · Comma separated",
+  );
+  await page
+    .getByText("Source delimiter and file structure", { exact: true })
+    .click();
+  await expect(page.getByLabel("Delimiter", { exact: true })).toHaveValue("");
+});
+test("a phone and negative decimal survive an exact valid export", async ({
+  page,
+}, info) => {
+  await page
+    .getByLabel("Choose CSV file", { exact: true })
+    .setInputFiles({
+      name: "phone.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from("id,phone,balance\nA,+44 7700 900123,-12.50"),
+    });
+  await page
+    .getByLabel("Type for balance", { exact: true })
+    .selectOption("decimal");
+  await page.getByRole("button", { name: "Run checks", exact: true }).click();
+  await page.getByRole("button", { name: "Export files", exact: true }).click();
+  await expect(
+    page.getByText(/2 cells would gain an apostrophe/),
+  ).toBeVisible();
+  const waiting = page.waitForEvent("download");
+  await page.getByRole("button", { name: /^Valid records/ }).click();
+  const target = path.join(info.outputDir, "phone.csv");
+  await (await waiting).saveAs(target);
+  expect(await readFile(target, "utf8")).toContain(
+    '"A","+44 7700 900123","-12.50"',
+  );
+});
+test("dialogs are centred at desktop and phone widths and clear uses a styled confirmation", async ({
+  page,
+}) => {
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.getByRole("button", { name: /How it works/ }).click();
+    const rect = await page.getByRole("dialog").boundingBox();
+    expect(Math.abs(rect!.x + rect!.width / 2 - width / 2)).toBeLessThan(2);
+    expect(rect!.y).toBeGreaterThan(0);
+    await page
+      .getByRole("button", { name: "Close guide", exact: true })
+      .click();
+  }
+  await page
+    .getByRole("button", { name: "Try the sample", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Clear workspace", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText("Clear the workspace?");
+  await page.getByRole("button", { name: "Keep working", exact: true }).click();
+  await expect(page.locator(".source-bar")).toContainText(
+    "sample-customers.csv",
+  );
+});
+test("several corrections can be saved before one rerun with visible field guidance", async ({
+  page,
+}) => {
+  await page
+    .getByRole("button", { name: "Try the sample", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Run checks", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Edit record 3, customer_id", exact: true })
+    .click();
+  await page
+    .getByRole("textbox", { name: "New customer_id", exact: true })
+    .fill("C-1099");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "Record 3 saved. Results are out of date",
+  );
+  await expect(
+    page.getByRole("button", { name: "03Export files", exact: true }),
+  ).toBeDisabled();
+  await page
+    .getByRole("button", { name: "Edit record 4, joined", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText("YYYY-MM-DD");
+  await expect(page.getByRole("dialog")).toContainText(
+    "allowed values: active, paused",
+  );
+  await page
+    .getByRole("textbox", { name: "New joined", exact: true })
+    .fill("2026-04-03");
+  await page
+    .getByRole("textbox", { name: "New status", exact: true })
+    .fill("active");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await page.getByRole("button", { name: "Run checks", exact: true }).click();
+  await expect(
+    page.getByText("6 valid · 0 requiring review · 0 findings", {
+      exact: true,
+    }),
+  ).toBeVisible();
+});
+test("duplicate partners can be reached on another page and findings fit a phone", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const rows = Array.from(
+    { length: 33 },
+    (_, i) => `${i === 32 ? "A" : i === 0 ? "A" : "B" + i},Name${i}`,
+  );
+  await page
+    .getByLabel("Choose CSV file", { exact: true })
+    .setInputFiles({
+      name: "many.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from("id,name\n" + rows.join("\n")),
+    });
+  await page.getByRole("button", { name: "Run checks", exact: true }).click();
+  const summary = await page
+    .getByRole("heading", {
+      name: "A few records need attention.",
+      exact: true,
+    })
+    .boundingBox();
+  expect(summary!.y).toBeGreaterThanOrEqual(0);
+  expect(summary!.y).toBeLessThan(150);
+  const finding = await page.locator(".finding-cell").first().boundingBox();
+  expect(finding!.x).toBeGreaterThanOrEqual(0);
+  expect(finding!.x + finding!.width).toBeLessThanOrEqual(390);
+  await page
+    .getByRole("button", { name: "Go to record 33", exact: true })
+    .click();
+  await expect(page.locator("#record-33")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Go to record 1", exact: true }),
+  ).toBeVisible();
 });

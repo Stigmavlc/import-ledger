@@ -24,6 +24,7 @@ export interface Issue {
   kind: string;
   message: string;
   relatedRecords?: number[];
+  matchingRecordCount?: number;
 }
 export interface Query {
   name: string;
@@ -111,7 +112,8 @@ export function initialRules(sheet: Sheet): Rule[] {
 export const typeExpectations: Record<FieldType, string> = {
   text: "text",
   integer: "a whole number, such as 12 or -3, without leading zeros",
-  decimal: "a decimal with a full stop, such as 12.50 or -3.25, without thousands separators",
+  decimal:
+    "a decimal with a full stop, such as 12.50 or -3.25, without thousands separators",
   date: "a real calendar date in YYYY-MM-DD form",
   email: "a basic email address in name@example.test form, without spaces",
 };
@@ -197,6 +199,7 @@ export async function inspect(
     );
     ref.free();
     db.run("CREATE INDEX reference_lookup ON reference_values(field,value)");
+    const duplicateGroups = new Map<string, number[]>();
     function check(
       name: string,
       sql: string,
@@ -210,12 +213,30 @@ export async function inspect(
       let count = 0;
       while (statement.step()) {
         const row = statement.getAsObject();
-        const relatedRecords = kind === "Duplicate"
-          ? String(row.records).split(",").map(Number).filter(n => n !== Number(row.record))
-          : undefined;
-        issues.push({ record: Number(row.record), field, kind,
+        let relatedRecords: number[] | undefined;
+        let matchingRecordCount: number | undefined;
+        if (kind === "Duplicate") {
+          const group = String(row.records);
+          let partners = duplicateGroups.get(group);
+          if (!partners) {
+            partners = group.split(",").map(Number);
+            duplicateGroups.set(group, partners);
+          }
+          matchingRecordCount = partners.length - 1;
+          relatedRecords = partners
+            .slice(0, 11)
+            .filter((n) => n !== Number(row.record))
+            .slice(0, 10);
+          row.partnerPreview = relatedRecords.join(", ");
+          row.remainingPartners = matchingRecordCount - relatedRecords.length;
+        }
+        issues.push({
+          record: Number(row.record),
+          field,
+          kind,
           message: typeof message === "function" ? message(row) : message,
-          ...(relatedRecords ? { relatedRecords } : {}) });
+          ...(relatedRecords ? { relatedRecords, matchingRecordCount } : {}),
+        });
         count++;
       }
       statement.free();
@@ -248,7 +269,8 @@ export async function inspect(
           [],
           r.name,
           "Duplicate",
-          row => `Value “${row.value}” is also used by record(s) ${String(row.records).split(",").filter(n => Number(n) !== Number(row.record)).join(", ")}. Review every matching record.`,
+          (row) =>
+            `Value “${row.value}” is also used by record(s) ${row.partnerPreview}${Number(row.remainingPartners) > 0 ? ` and ${row.remainingPartners} more` : ""}. Every matching record has its own finding.`,
         );
       if (r.reference.length)
         check(
@@ -287,7 +309,11 @@ export function metadataColumn(headers: string[], preferred: string): string {
   while (headers.includes(name)) name = "_" + name;
   return name;
 }
-export function csv(headers: string[], rows: string[][], protect = true): string {
+export function csv(
+  headers: string[],
+  rows: string[][],
+  protect = true,
+): string {
   return (
     Papa.unparse(
       {

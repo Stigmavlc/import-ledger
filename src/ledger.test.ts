@@ -134,7 +134,6 @@ describe("audit boundaries", () => {
   });
 });
 
-
 describe("import fidelity and precise review findings", () => {
   it("preserves international phones and negative decimals by default", async () => {
     const sheet = readCsv("id,phone,balance\nA,+44 7700 900123,-12.50");
@@ -149,44 +148,97 @@ describe("import fidelity and precise review findings", () => {
     expect(exportCsv(result, rules, "valid", true)).toContain("'-12.50");
   });
   it("names duplicate partners, the value and expected input formats", async () => {
-    const sheet = readCsv("id,date,balance,count,email,status\nA,03/04/2026,1\"2,01,bad,unknown\nA,2026-10-01,2.0,1,a@example.test,active".replace('1\"2', '1x2'));
+    const sheet = readCsv(
+      'id,date,balance,count,email,status\nA,03/04/2026,1"2,01,bad,unknown\nA,2026-10-01,2.0,1,a@example.test,active'.replace(
+        '1\"2',
+        "1x2",
+      ),
+    );
     const rules = initialRules(sheet);
-    rules[1].type = "date"; rules[2].type = "decimal";
-    rules[3].type = "integer"; rules[4].type = "email";
+    rules[1].type = "date";
+    rules[2].type = "decimal";
+    rules[3].type = "integer";
+    rules[4].type = "email";
     rules[5].reference = ["active"];
     const result = await inspect(sheet, rules, load);
-    expect(result.issues.find(i => i.record === 1 && i.kind === "Duplicate")).toMatchObject({relatedRecords:[2]});
-    expect(result.issues.find(i => i.kind === "Duplicate")?.message).toContain('“A”');
-    for (const expected of ["YYYY-MM-DD", "full stop", "whole number", "name@example.test", "allowed list"])
-      expect(result.issues.some(i => i.message.includes(expected))).toBe(true);
+    expect(
+      result.issues.find((i) => i.record === 1 && i.kind === "Duplicate"),
+    ).toMatchObject({ relatedRecords: [2] });
+    expect(
+      result.issues.find((i) => i.kind === "Duplicate")?.message,
+    ).toContain("“A”");
+    for (const expected of [
+      "YYYY-MM-DD",
+      "full stop",
+      "whole number",
+      "name@example.test",
+      "allowed list",
+    ])
+      expect(result.issues.some((i) => i.message.includes(expected))).toBe(
+        true,
+      );
   });
   it("leaves volatile UI identifiers out of otherwise identical audit exports", async () => {
     const sheet = readCsv("id\nA");
     const rules = initialRules(sheet);
     const result = await inspect(sheet, rules, load);
-    const other = rules.map(r => ({...r, id:"another-session-id"}));
-    expect(manifest(sheet, rules, result, "same")).toBe(manifest(sheet, other, result, "same"));
-    expect(JSON.parse(manifest(sheet, other, result, "same")).mapping[0]).not.toHaveProperty("id");
+    const other = rules.map((r) => ({ ...r, id: "another-session-id" }));
+    expect(manifest(sheet, rules, result, "same")).toBe(
+      manifest(sheet, other, result, "same"),
+    );
+    expect(
+      JSON.parse(manifest(sheet, other, result, "same")).mapping[0],
+    ).not.toHaveProperty("id");
   });
   it("ignores multiple trailing blank lines but keeps interior blank records", () => {
     expect(readCsv("id,name\nA,Ann\nB,Bob\n\n\n").rows).toHaveLength(2);
-    expect(readCsv("id\nA\n\nB\n\n").rows).toEqual([["A"],[""],["B"]]);
+    expect(readCsv("id\nA\n\nB\n\n").rows).toEqual([["A"], [""], ["B"]]);
   });
 });
 describe("documented resource limits", () => {
+  it("reports a maximum-size duplicate group without quadratic partner lists", async () => {
+    const sheet = readCsv("id\n" + Array(LIMIT_RECORDS).fill("A").join("\n"));
+    const rules = initialRules(sheet);
+    const result = await inspect(sheet, rules, load);
+    expect(result.issues).toHaveLength(LIMIT_RECORDS);
+    expect(result.issues[0].matchingRecordCount).toBe(LIMIT_RECORDS - 1);
+    expect(result.issues.every((i) => i.relatedRecords!.length <= 10)).toBe(
+      true,
+    );
+    expect(JSON.stringify(result.issues).length).toBeLessThan(2_500_000);
+    expect(result.issues.at(-1)?.relatedRecords).toContain(1);
+  });
   it("rejects a file above one million UTF-8 bytes", () =>
     expect(() => readCsv("id\n" + "x".repeat(LIMIT_BYTES))).toThrow(/1 MB/));
   it("accepts 5,000 records and rejects the next record", () => {
-    expect(readCsv("id\n" + Array(LIMIT_RECORDS).fill("A").join("\n")).rows).toHaveLength(LIMIT_RECORDS);
-    expect(() => readCsv("id\n" + Array(LIMIT_RECORDS+1).fill("A").join("\n"))).toThrow(/5,000/);
+    expect(
+      readCsv("id\n" + Array(LIMIT_RECORDS).fill("A").join("\n")).rows,
+    ).toHaveLength(LIMIT_RECORDS);
+    expect(() =>
+      readCsv(
+        "id\n" +
+          Array(LIMIT_RECORDS + 1)
+            .fill("A")
+            .join("\n"),
+      ),
+    ).toThrow(/5,000/);
   });
   it("rejects a 61st source column", () =>
-    expect(() => readCsv(Array.from({length:LIMIT_COLUMNS+1}, (_,i)=>`f${i}`).join(",")+"\n"+Array(LIMIT_COLUMNS+1).fill("x").join(","))).toThrow(/60 columns/));
+    expect(() =>
+      readCsv(
+        Array.from({ length: LIMIT_COLUMNS + 1 }, (_, i) => `f${i}`).join(",") +
+          "\n" +
+          Array(LIMIT_COLUMNS + 1)
+            .fill("x")
+            .join(","),
+      ),
+    ).toThrow(/60 columns/));
   it("accepts 500 allowed values and rejects the next", () => {
-    const sheet=readCsv("id\nA"), rules=initialRules(sheet);
-    rules[0].reference=Array.from({length:500},(_,i)=>String(i));
-    expect(() => validateRules(rules,sheet)).not.toThrow();
+    const sheet = readCsv("id\nA"),
+      rules = initialRules(sheet);
+    rules[0].reference = Array.from({ length: 500 }, (_, i) => String(i));
+    expect(() => validateRules(rules, sheet)).not.toThrow();
     rules[0].reference.push("extra");
-    expect(() => validateRules(rules,sheet)).toThrow(/500/);
+    expect(() => validateRules(rules, sheet)).toThrow(/500/);
   });
 });

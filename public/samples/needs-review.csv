@@ -1,3 +1,7 @@
 customer_id,name,email,joined,status
-C-2001,Elena Valls,elena@example.test,2026-09-18,active
-C-2001,Inés Vidal,ines@example.test,03/04/2026,pending
+C-1048,Elena Valls,elena@example.test,2026-09-18,active
+C-1051,Niall Keane,niall@example.test,2026-09-21,paused
+C-1048,Amira Osei,amira@example.test,2026-09-22,active
+C-1063,Inés Vidal,ines@example.test,03/04/2026,pending
+C-1072,Farah Nouri,farah@example.test,2026-10-02,active
+C-1081,Tomás Serra,tomas@example.test,2026-10-03,paused

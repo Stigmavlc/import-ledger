@@ -6,7 +6,18 @@ Check a CSV before handing it to an import process. Map its columns, choose expl
 
 Import Ledger is a small browser tool for onboarding and support work. It helps answer concrete questions: which records share an identifier, which dates need a decision, and which values fall outside an agreed list? It does not connect to a customer system or claim that a destination will accept the output.
 
+![Column mapping and explicit field rules](docs/screenshots/workspace.png)
+
 ![Record findings and the SQLite check ledger](docs/screenshots/inspection.png)
+
+![The duplicate query uses GROUP BY and HAVING](docs/screenshots/query.png)
+
+<details>
+<summary>Findings at a 390 pixel screen width</summary>
+
+![Phone layout with findings before source fields](docs/screenshots/mobile-workspace.png)
+
+</details>
 
 ## A short walkthrough
 
@@ -14,9 +25,9 @@ Import Ledger is a small browser tool for onboarding and support work. It helps 
 2. Review **Map fields**. The first column starts as required and unique. For the sample, email and date rules and an allowed status list are already set. Uploaded files start with text fields; choose the rules yourself.
 3. Select **Run checks**. Three sample records pass. The other three have four findings. Select a query to see the SQL and its bound parameters.
 4. Inspect the records. Change the third record's identifier to `C-1099`. Change record four's date to `2026-04-03` and status to `active` only if those are the intended values. These are explicit example decisions, not values the tool can infer.
-5. Run the checks again. All six pass. Download the valid CSV, the rejected CSV and the JSON audit from **Export files**.
+5. Saving a correction keeps inspection open and marks the previous findings out of date. Correct several records before one new run; exports remain disabled. Run the checks again. All six pass. Download the valid CSV, the rejected CSV and the JSON audit from **Export files**.
 
-The [sample files](public/samples/) include a valid list, records needing review and a structurally broken CSV. They contain fictional people and reserved example email addresses. Download a file from GitHub's raw view to try the upload flow. A file upload does not infer the sample's validation rules.
+Download a [valid list](https://stigmavlc.github.io/import-ledger/samples/valid-customers.csv), the [six records needing review](https://stigmavlc.github.io/import-ledger/samples/needs-review.csv), or a [structurally broken CSV](https://stigmavlc.github.io/import-ledger/samples/broken-quotes.csv). The app also has direct sample download links. The files contain fictional people and reserved example email addresses. Uploaded files do not infer the sample's rules: set the joined field to Date, email to Email, and status to the allowed values active and paused before checking the review sample.
 
 ## What the workspace does
 
@@ -59,7 +70,7 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-Unit tests cover CSV structure, quoting, Unicode, type ambiguity, blank values, duplicate groups, reference membership, SQL parameter separation, escaping, deterministic exports and edit history. Browser tests cover importing, inspecting queries, repairing records, downloading files, invalid UTF-8, malformed input, the absence of application persistence and mobile containment. GitHub Actions runs the same checks, then publishes the built output to Pages.
+Unit tests cover CSV structure, quoted and trailing lines, Unicode, all four resource limits, type ambiguity, blank values, duplicate partners, reference membership, SQL parameter separation, exact versus protected exports, deterministic audits and edit history. Browser tests cover importing, delimiter reset, inspecting queries, multiple corrections before one rerun, exact phone and decimal exports, explicit spreadsheet protection, downloads, invalid UTF-8, malformed input, no application persistence, centred dialogs and findings on a 390 pixel screen. GitHub Actions runs the same checks, then publishes the built output to Pages.
 
 The tests demonstrate this scope on synthetic examples. They do not establish compatibility with every spreadsheet or third-party import system.
 
@@ -75,7 +86,9 @@ Files must be valid UTF-8 with one header row, at least one record, no more than
 
 No automatic date conversion, trimming, deduplication, key generation, fuzzy matching, destination schema lookup or live import occurs. There are no cross-file joins, composite keys, saved mappings, XLSX support or arbitrary SQL editor. A reference list can contain at most 500 values per field. Each unique key is checked separately. A passing record satisfies only the rules chosen here.
 
-CSV export protects formula prefixes by adding an apostrophe, including to negative-looking numbers. That is an explicit export transformation and can affect the receiving application's interpretation. Review the [format reference](docs/format.md) before importing an exported file.
+Duplicate findings show up to ten partner record links and the total number of other matches. Every member of the group has a separate finding, so large groups remain reviewable without repeating thousands of links in each row.
+
+The valid import CSV preserves exact mapped values by default, including international phone numbers and negative amounts. An explicit export checkbox offers spreadsheet protection and shows the number of cells it would alter. Protection prefixes matching values and headers with an apostrophe, which changes what an importer receives. The review CSV always uses this protection. A spreadsheet can evaluate formula-like values in an exact-value export; inspect it as text or use the intended importer. Review the [format reference](docs/format.md) before importing an exported file.
 
 ## Licence
 

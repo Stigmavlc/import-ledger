@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowRight,
@@ -20,6 +20,8 @@ import {
   csv,
   LIMIT_BYTES,
   metadataColumn,
+  needsSpreadsheetProtection,
+  typeExpectations,
 } from "./ledger";
 import type { Sheet, Rule, Audit, FieldType } from "./ledger";
 let sqlReady: ReturnType<typeof initSqlJs> | undefined;
@@ -54,6 +56,10 @@ export default function App() {
   const [step, setStep] = useState<"map" | "inspect" | "export">("map"),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
+    [stale, setStale] = useState(false),
+    [protectExport, setProtectExport] = useState(false),
+    [jump, setJump] = useState(""),
+    [focusRecord, setFocusRecord] = useState<number | null>(null),
     [filter, setFilter] = useState<"all" | "rejected" | "valid">("all");
   const [hash, setHash] = useState(""),
     [delimiter, setDelimiter] = useState(""),
@@ -67,6 +73,8 @@ export default function App() {
     dialogRef = useRef<HTMLDialogElement>(null),
     guideRef = useRef<HTMLDialogElement>(null),
     editRef = useRef<HTMLDialogElement>(null),
+    clearRef = useRef<HTMLDialogElement>(null),
+    resultsRef = useRef<HTMLElement>(null),
     loadVersion = useRef(0),
     revision = useRef(0),
     originalRows = useRef<string[][]>([]),
@@ -74,17 +82,13 @@ export default function App() {
   const resetAudit = () => {
     revision.current++;
     setAudit(null);
+    setStale(false);
     setStep("map");
     setQuery(null);
     setPage(0);
     setNotice("Rules or records changed. Run the checks again before export.");
   };
-  function accept(
-    text: string,
-    name: string,
-    chosen = delimiter,
-    isSample = false,
-  ) {
+  function accept(text: string, name: string, chosen = "", isSample = false) {
     try {
       const parsed = readCsv(text, name, chosen);
       const next = initialRules(parsed);
@@ -97,6 +101,9 @@ export default function App() {
       originalRows.current = parsed.rows;
       setSheet(parsed);
       setRules(next);
+      setDelimiter(chosen);
+      setStale(false);
+      setProtectExport(false);
       setRaw(text);
       setHash("");
       setAudit(null);
@@ -161,6 +168,7 @@ export default function App() {
       const next = await inspect(sheet, rules, loadSql);
       if (revision.current !== version) return;
       setAudit(next);
+      setStale(false);
       setStep("inspect");
       setFilter("all");
       setPage(0);
@@ -181,10 +189,61 @@ export default function App() {
         i === edit.record - 1 ? edit.row : row,
       ),
     });
-    resetAudit();
+    revision.current++;
+    setStale(true);
+    setNotice(
+      `Record ${edit.record} saved. Results are out of date. Make any other corrections, then run checks again.`,
+    );
     editRef.current?.close();
     setEdit(null);
   }
+  useEffect(() => {
+    if (audit && step === "inspect")
+      resultsRef.current?.scrollIntoView({ block: "start" });
+  }, [audit]);
+  useEffect(() => {
+    if (focusRecord !== null)
+      document
+        .getElementById(`record-${focusRecord}`)
+        ?.scrollIntoView({ block: "center" });
+  }, [focusRecord, page, filter]);
+  function jumpTo(record: number) {
+    if (
+      !sheet ||
+      !Number.isInteger(record) ||
+      record < 1 ||
+      record > sheet.rows.length
+    ) {
+      setNotice("Choose an existing data record number.");
+      return;
+    }
+    setFilter("all");
+    setPage(Math.floor((record - 1) / 25));
+    setFocusRecord(record);
+    setNotice(`Showing record ${record}.`);
+  }
+  function clearWorkspace() {
+    loadVersion.current++;
+    fileRequest.current++;
+    revision.current++;
+    setSheet(null);
+    setRules([]);
+    setAudit(null);
+    setRaw("");
+    setHash("");
+    setError("");
+    setStale(false);
+    setDelimiter("");
+    setFocusRecord(null);
+    setNotice("Workspace cleared.");
+    clearRef.current?.close();
+  }
+  const protectedCellCount = audit
+    ? [
+        ...rules.map((r) => r.name),
+        ...audit.valid.flatMap((n) => audit.mapped[n - 1]),
+      ].filter(needsSpreadsheetProtection).length
+    : 0;
   function rejectedCsv() {
     if (!sheet || !audit) return "";
     return csv(
@@ -269,7 +328,9 @@ export default function App() {
               <button
                 key={s}
                 className={step === s ? "current" : ""}
-                disabled={!sheet || (s !== "map" && !audit)}
+                disabled={
+                  !sheet || (s !== "map" && !audit) || (s === "export" && stale)
+                }
                 onClick={() => setStep(s)}
               >
                 <span>0{i + 1}</span>
@@ -286,7 +347,7 @@ export default function App() {
             Runs locally
           </span>
         </div>
-        <div aria-live="polite" className="sr-only">
+        <div role="status" aria-live="polite" className="status-message">
           {notice}
         </div>
         {error && (
@@ -343,8 +404,10 @@ export default function App() {
                 <span>
                   <strong>{sheet.name}</strong>
                   <small>
-                    {sheet.rows.length.toLocaleString("en-GB")} records ·{" "}
-                    {sheet.headers.length} columns ·{" "}
+                    {sheet.rows.length.toLocaleString("en-GB")}{" "}
+                    {sheet.rows.length === 1 ? "record" : "records"} ·{" "}
+                    {sheet.headers.length}{" "}
+                    {sheet.headers.length === 1 ? "column" : "columns"} ·{" "}
                     {sheet.delimiter === "\t"
                       ? "Tab"
                       : sheet.delimiter === ","
@@ -604,25 +667,46 @@ export default function App() {
               </section>
             )}
             {step === "inspect" && audit && (
-              <section>
+              <section ref={resultsRef} className="results-section">
                 <div className="section-heading">
                   <div>
                     <p className="eyebrow">OBSERVE, THEN CORRECT</p>
                     <h2>
-                      {audit.rejected.length
-                        ? "A few records need attention."
-                        : "The current checks passed."}
+                      {stale
+                        ? "Results need a fresh check."
+                        : audit.rejected.length
+                          ? "A few records need attention."
+                          : "The current checks passed."}
                     </h2>
                     <p>
                       {audit.valid.length} valid · {audit.rejected.length}{" "}
                       requiring review · {audit.issues.length} findings
                     </p>
                   </div>
-                  <button className="primary" onClick={() => setStep("export")}>
+                  <button
+                    className="primary"
+                    disabled={stale}
+                    onClick={() => setStep("export")}
+                  >
                     Export files
                     <ArrowRight />
                   </button>
                 </div>
+                {stale && (
+                  <div className="stale-results">
+                    <p>
+                      Records have changed. Findings below are from the previous
+                      run. Export is unavailable until all checks finish again.
+                    </p>
+                    <button
+                      className="primary"
+                      disabled={busy}
+                      onClick={() => void run()}
+                    >
+                      {busy ? "Checking records…" : "Run checks"}
+                    </button>
+                  </div>
+                )}
                 <div className="inspection-layout">
                   <div className="record-panel">
                     <div className="filter-row">
@@ -649,8 +733,8 @@ export default function App() {
                     <div className="records-scroll">
                       <table className="records">
                         <caption className="sr-only">
-                          Source records with validation findings. Edit a value
-                          to return to mapping and rerun all checks.
+                          Source records with validation findings. Save
+                          corrections and rerun all checks before export.
                         </caption>
                         <thead>
                           <tr>
@@ -667,6 +751,7 @@ export default function App() {
                             .map(({ row, record }) => (
                               <tr
                                 key={record}
+                                id={`record-${record}`}
                                 className={
                                   audit.rejected.includes(record)
                                     ? "flagged"
@@ -677,9 +762,10 @@ export default function App() {
                                   {String(record).padStart(2, "0")}
                                 </th>
                                 {row.map((v, f) => (
-                                  <td key={f}>
+                                  <td key={f} data-label={sheet.headers[f]}>
                                     <button
                                       className="cell-edit"
+                                      disabled={busy}
                                       aria-label={`Edit record ${record}, ${sheet.headers[f]}`}
                                       onClick={() => {
                                         setEdit({ record, row: [...row] });
@@ -692,12 +778,24 @@ export default function App() {
                                     </button>
                                   </td>
                                 ))}
-                                <td className="finding-cell">
+                                <td
+                                  className="finding-cell"
+                                  data-label="Findings"
+                                >
                                   {audit.issues
                                     .filter((i) => i.record === record)
                                     .map((i, n) => (
                                       <span key={n}>
                                         <b>{i.field}</b>: {i.message}
+                                        {i.relatedRecords?.map((n) => (
+                                          <button
+                                            key={n}
+                                            className="record-link"
+                                            onClick={() => jumpTo(n)}
+                                          >
+                                            Go to record {n}
+                                          </button>
+                                        ))}
                                       </span>
                                     ))}
                                   {!audit.rejected.includes(record) && (
@@ -715,6 +813,27 @@ export default function App() {
                     {!displayed.length && (
                       <p className="no-results">No records in this view.</p>
                     )}
+                    <form
+                      className="record-jump"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        jumpTo(Number(jump));
+                      }}
+                    >
+                      <label htmlFor="jump-record">Find a data record</label>
+                      <input
+                        id="jump-record"
+                        type="number"
+                        min="1"
+                        max={sheet.rows.length}
+                        value={jump}
+                        onChange={(e) => setJump(e.target.value)}
+                        placeholder="Record number"
+                      />
+                      <button className="secondary" type="submit">
+                        Go to record
+                      </button>
+                    </form>
                     <div className="pagination">
                       <button
                         className="quiet"
@@ -785,18 +904,38 @@ export default function App() {
                     audit captures rules, queries and record numbers.
                   </p>
                   <p className="footnote">
-                    Exports contain data. Review them before sharing. CSV cells
-                    beginning with spreadsheet formula characters are prefixed
-                    with an apostrophe; the audit keeps the original issue
-                    details.
+                    Valid import values are preserved exactly unless you choose
+                    spreadsheet protection. Review files always protect formula
+                    prefixes. A spreadsheet can evaluate formula-like values in
+                    an unprotected file; use a text viewer or your intended
+                    importer for exact-value exports.
                   </p>
                 </div>
                 <div className="export-list">
+                  <label className="export-choice">
+                    <input
+                      type="checkbox"
+                      checked={protectExport}
+                      onChange={(e) => setProtectExport(e.target.checked)}
+                    />
+                    Add spreadsheet protection to the valid CSV
+                  </label>
+                  <p>
+                    {protectedCellCount}{" "}
+                    {protectedCellCount === 1
+                      ? "cell would gain"
+                      : "cells would gain"}{" "}
+                    an apostrophe, including matching headers, phone numbers and
+                    negative amounts. This changes their values.{" "}
+                    {protectExport
+                      ? "Protection is on."
+                      : "Protection is off; exact values will be exported."}
+                  </p>
                   <button
                     onClick={() =>
                       download(
                         "import-ledger-valid.csv",
-                        exportCsv(audit, rules, "valid"),
+                        exportCsv(audit, rules, "valid", protectExport),
                         "text/csv;charset=utf-8",
                       )
                     }
@@ -875,33 +1014,57 @@ export default function App() {
           aria-label="Choose CSV file"
           onChange={(e) => void chooseFile(e.target.files?.[0])}
         />
+        <nav className="sample-downloads" aria-label="Download sample files">
+          <span>Try an upload:</span>
+          <a href="./samples/needs-review.csv" download>
+            Sample needing review
+          </a>
+          <a href="./samples/valid-customers.csv" download>
+            Valid sample
+          </a>
+          <a href="./samples/broken-quotes.csv" download>
+            Broken CSV
+          </a>
+        </nav>
         <footer className="footer">
           <span>Import Ledger / CSV preflight</span>
           <span>Made for the careful handover.</span>
           <button
             className="quiet"
             disabled={busy || !sheet}
-            onClick={() => {
-              if (
-                confirm(
-                  "Clear this workspace? Unsaved records and edits will be removed from this tab.",
-                )
-              ) {
-                loadVersion.current++;
-                setSheet(null);
-                setRules([]);
-                setAudit(null);
-                setRaw("");
-                setHash("");
-                setError("");
-                setNotice("Workspace cleared.");
-              }
-            }}
+            onClick={() => clearRef.current?.showModal()}
           >
             Clear workspace
           </button>
         </footer>
       </main>
+      <dialog ref={clearRef} aria-labelledby="clear-title">
+        <div className="dialog-top">
+          <h2 id="clear-title">Clear the workspace?</h2>
+          <button
+            className="icon-button"
+            aria-label="Close clear dialog"
+            onClick={() => clearRef.current?.close()}
+          >
+            <X />
+          </button>
+        </div>
+        <p>
+          The current records, rules and unsaved edits will be removed from this
+          tab. Existing downloads stay on your device.
+        </p>
+        <div className="actions">
+          <button
+            className="secondary"
+            onClick={() => clearRef.current?.close()}
+          >
+            Keep working
+          </button>
+          <button className="primary" onClick={clearWorkspace}>
+            Clear records
+          </button>
+        </div>
+      </dialog>
       <dialog
         ref={dialogRef}
         onClose={() => setQuery(null)}
@@ -965,13 +1128,36 @@ export default function App() {
             </button>
           </div>
           <p>
-            Change the source values explicitly. Saving clears the previous
-            results and returns to mapping so every check runs again.
+            Change the source values explicitly. Save as many records as needed,
+            then run checks again. Export stays disabled while results are out
+            of date.
           </p>
           {edit &&
             sheet?.headers.map((header, i) => (
               <label className="edit-field" key={i}>
                 {header}
+                <span className="field-guidance">
+                  {rules
+                    .filter((r) => r.source === i)
+                    .map(
+                      (r) =>
+                        `${r.name}: ${r.required ? "required; " : "optional; "}${typeExpectations[r.type]}${r.reference.length ? `; allowed values: ${r.reference.join(", ")}` : ""}`,
+                    )
+                    .join(". ")}
+                </span>
+                {audit?.issues
+                  .filter(
+                    (issue) =>
+                      issue.record === edit.record &&
+                      rules.some(
+                        (r) => r.source === i && r.name === issue.field,
+                      ),
+                  )
+                  .map((issue, n) => (
+                    <span className="field-finding" key={n}>
+                      {issue.message}
+                    </span>
+                  ))}
                 <textarea
                   rows={2}
                   aria-label={`New ${header}`}
