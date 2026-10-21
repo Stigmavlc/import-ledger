@@ -188,3 +188,38 @@ test("mobile mapping and editing remain contained and keyboard accessible", asyn
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
+
+test("audit download keeps source identity and explicit changes", async ({
+  page,
+}, info) => {
+  await page
+    .getByRole("button", { name: "Try the sample", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Run checks", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Edit record 4, joined", exact: true })
+    .click();
+  await page
+    .getByRole("textbox", { name: "New joined", exact: true })
+    .fill("2026-04-03");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await page.getByRole("button", { name: "Run checks", exact: true }).click();
+  await page.getByRole("button", { name: "Export files", exact: true }).click();
+  const waiting = page.waitForEvent("download");
+  await page.getByRole("button", { name: /Audit manifest/ }).click();
+  const downloaded = await waiting;
+  const target = path.join(info.outputDir, "audit.json");
+  await downloaded.saveAs(target);
+  const report = JSON.parse(await readFile(target, "utf8"));
+  expect(report.format).toBe("import-ledger/audit-v1");
+  expect(report.source.sha256).toMatch(/^[a-f0-9]{64}$/);
+  expect(report.summary).toEqual({ valid: 3, rejected: 3, issues: 3 });
+  expect(report.edits).toEqual([
+    { record: 4, field: "joined", before: "03/04/2026", after: "2026-04-03" },
+  ]);
+  expect(
+    report.queries.some((query: { sql: string }) =>
+      query.sql.includes("LEFT JOIN"),
+    ),
+  ).toBe(true);
+});

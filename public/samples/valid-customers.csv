@@ -1,0 +1,3 @@
+customer_id,name,email,joined,status
+C-2001,Elena Valls,elena@example.test,2026-09-18,active
+C-2002,Inés Vidal,ines@example.test,2026-10-02,paused
