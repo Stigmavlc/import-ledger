@@ -23,6 +23,7 @@ export interface Issue {
   field: string;
   kind: string;
   message: string;
+  relatedRecords?: number[];
 }
 export interface Query {
   name: string;
@@ -64,8 +65,8 @@ export function readCsv(
   if (errors.length)
     throw new Error(`CSV could not be read: ${errors[0].message}`);
   const data = parsed.data;
-  // A terminal newline is a record separator, not an extra blank record.
-  if (
+  // Empty physical lines at the end do not describe data records.
+  while (
     data.length > 1 &&
     data.at(-1)?.length === 1 &&
     data.at(-1)?.[0] === "" &&
@@ -107,6 +108,13 @@ export function initialRules(sheet: Sheet): Rule[] {
     reference: [],
   }));
 }
+export const typeExpectations: Record<FieldType, string> = {
+  text: "text",
+  integer: "a whole number, such as 12 or -3, without leading zeros",
+  decimal: "a decimal with a full stop, such as 12.50 or -3.25, without thousands separators",
+  date: "a real calendar date in YYYY-MM-DD form",
+  email: "a basic email address in name@example.test form, without spaces",
+};
 export function validType(value: string, type: FieldType): boolean {
   if (!value.trim()) return true; // Required is a separate rule. Preserve exact values.
   switch (type) {
@@ -195,14 +203,19 @@ export async function inspect(
       parameters: string[],
       field: string,
       kind: string,
-      message: string,
+      message: string | ((row: Record<string, unknown>) => string),
     ) {
       const statement = db.prepare(sql);
       statement.bind(parameters);
       let count = 0;
       while (statement.step()) {
         const row = statement.getAsObject();
-        issues.push({ record: Number(row.record), field, kind, message });
+        const relatedRecords = kind === "Duplicate"
+          ? String(row.records).split(",").map(Number).filter(n => n !== Number(row.record))
+          : undefined;
+        issues.push({ record: Number(row.record), field, kind,
+          message: typeof message === "function" ? message(row) : message,
+          ...(relatedRecords ? { relatedRecords } : {}) });
         count++;
       }
       statement.free();
@@ -226,16 +239,16 @@ export async function inspect(
           [],
           r.name,
           "Type",
-          `Use an explicit ${r.type} value; no automatic conversion was applied.`,
+          `Expected ${typeExpectations[r.type]}. The value has not been converted.`,
         );
       if (r.key)
         check(
           `${r.name}: duplicate key`,
-          `SELECT r.record FROM records AS r JOIN (SELECT ${col} AS value FROM records WHERE is_blank(${col}) = 0 GROUP BY ${col} HAVING COUNT(*) > 1) AS repeated ON r.${col} = repeated.value ORDER BY r.record`,
+          `SELECT r.record, repeated.value, repeated.records FROM records AS r JOIN (SELECT ${col} AS value, GROUP_CONCAT(record) AS records FROM records WHERE is_blank(${col}) = 0 GROUP BY ${col} HAVING COUNT(*) > 1) AS repeated ON r.${col} = repeated.value ORDER BY r.record`,
           [],
           r.name,
           "Duplicate",
-          "Every record sharing this key needs review.",
+          row => `Value “${row.value}” is also used by record(s) ${String(row.records).split(",").filter(n => Number(n) !== Number(row.record)).join(", ")}. Review every matching record.`,
         );
       if (r.reference.length)
         check(
@@ -244,7 +257,7 @@ export async function inspect(
           [col],
           r.name,
           "Reference",
-          "The exact value is absent from the reference list.",
+          "The value is not in the allowed list. Match one of the configured values exactly.",
         );
     });
     issues.sort(
@@ -263,22 +276,25 @@ export async function inspect(
   }
 }
 
+export function needsSpreadsheetProtection(value: string): boolean {
+  return /^[\t\r\n]|^\s*[=+@-]/.test(value);
+}
 function spreadsheetSafe(value: string): string {
-  return /^[\t\r\n]|^\s*[=+@-]/.test(value) ? "'" + value : value;
+  return needsSpreadsheetProtection(value) ? "'" + value : value;
 }
 export function metadataColumn(headers: string[], preferred: string): string {
   let name = preferred;
   while (headers.includes(name)) name = "_" + name;
   return name;
 }
-export function csv(headers: string[], rows: string[][]): string {
+export function csv(headers: string[], rows: string[][], protect = true): string {
   return (
     Papa.unparse(
       {
-        fields: headers.map(spreadsheetSafe),
-        data: rows.map((row) => row.map(spreadsheetSafe)),
+        fields: protect ? headers.map(spreadsheetSafe) : headers,
+        data: protect ? rows.map((row) => row.map(spreadsheetSafe)) : rows,
       },
-      { newline: "\r\n", quotes: true, escapeFormulae: true },
+      { newline: "\r\n", quotes: true, escapeFormulae: protect },
     ) + "\r\n"
   );
 }
@@ -286,6 +302,7 @@ export function exportCsv(
   audit: Audit,
   rules: Rule[],
   kind: "valid" | "rejected",
+  protect = false,
 ): string {
   const ids = audit[kind];
   return csv(
@@ -297,6 +314,7 @@ export function exportCsv(
       ...rules.map((r) => r.name),
     ],
     ids.map((n) => [String(n), ...audit.mapped[n - 1]]),
+    protect,
   );
 }
 export function manifest(
@@ -318,7 +336,12 @@ export function manifest(
           columns: sheet.headers,
         },
         mapping: rules.map((r) => ({
-          ...r,
+          name: r.name,
+          source: r.source,
+          required: r.required,
+          type: r.type,
+          key: r.key,
+          reference: r.reference,
           sourceHeader: r.source === null ? null : sheet.headers[r.source],
         })),
         summary: {
@@ -354,7 +377,7 @@ export function manifest(
         issues: audit.issues,
         queries: audit.queries,
         exportNotes:
-          "Values are preserved. Spreadsheet formula prefixes are escaped in CSV exports. Record numbers count data records, not physical lines. No live destination has been checked.",
+          "Valid import values are preserved by default. Optional spreadsheet protection prefixes matching cells with an apostrophe and changes their values; the review CSV always applies it. Explicit edits are recorded below; unchanged source values are not copied into this audit. Record numbers count data records, not physical lines. No live destination has been checked.",
       },
       null,
       2,
